@@ -1,6 +1,6 @@
 import { Octokit } from "@octokit/rest";
 import { createAppAuth } from "@octokit/auth-app";
-import { env } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 import { nanoid } from "nanoid";
 
 export function parseRepo(repo: string): { owner: string; repo: string } {
@@ -9,6 +9,7 @@ export function parseRepo(repo: string): { owner: string; repo: string } {
 }
 
 export async function getOctokit(): Promise<Octokit> {
+  const env = getEnv();
   if (env.GITHUB_MODE === "PAT") {
     return new Octokit({ auth: env.GH_TOKEN });
   }

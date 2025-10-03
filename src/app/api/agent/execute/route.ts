@@ -1,5 +1,5 @@
 import { verifyHmacRaw, verifyJwtOptional, isRepoAllowed, ipFromRequest, checkRateLimit, getIdempotent, setIdempotent } from "@/lib/auth";
-import { env } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 import { logger, withRequest } from "@/lib/logger";
 import { executeSchema, payloads } from "@/lib/schemas";
 import { addLabels, commentIssue, createIssue, createBranch, getFileUtf8, listPrs, mergePr, openPr, putFileUtf8, searchCode } from "@/lib/github";
@@ -30,6 +30,7 @@ function mapOctokitError(e: any): { status: number; code: string; message: strin
 export async function POST(request: Request) {
   const reqId = request.headers.get("x-request-id") || undefined;
   const log = withRequest(logger, { requestId: reqId, action: "agent:execute" });
+  const env = getEnv();
 
   // Read raw body once
   const rawAb = await request.arrayBuffer();

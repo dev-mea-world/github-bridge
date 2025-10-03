@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import { env } from "@/lib/env";
 
 type VerifyHmacResult = {
   ok: boolean;
@@ -54,7 +53,8 @@ export function verifyJwtOptional(authorizationHeader: string | null, secret?: s
 }
 
 export function isRepoAllowed(repo: string): boolean {
-  const list = env.REPO_ALLOWLIST.split(",").map((s) => s.trim()).filter(Boolean);
+  const csv = process.env.REPO_ALLOWLIST || "";
+  const list = csv.split(",").map((s) => s.trim()).filter(Boolean);
   return list.includes(repo);
 }
 
@@ -99,4 +99,3 @@ export function getIdempotent(key: string): IdemEntry | undefined {
 export function setIdempotent(key: string, status: number, body: any, headers: Record<string, string> = {}, ttlMs = 5 * 60 * 1000): void {
   idemCache.set(key, { storedAt: Date.now(), expireAt: Date.now() + ttlMs, status, body, headers });
 }
-

@@ -7,7 +7,8 @@ const EnvSchema = z
     GH_APP_ID: z.string().optional(),
     GH_APP_PRIVATE_KEY: z.string().optional(), // base64-encoded PEM
     GH_APP_INSTALLATION_ID: z.string().optional(),
-    GH_WEBHOOK_SECRET: z.string(),
+    // Make webhook secret optional at schema-level so build does not fail
+    GH_WEBHOOK_SECRET: z.string().optional(),
 
     AGENT_SHARED_SECRET: z.string(),
     AGENT_JWT_SECRET: z.string().optional(),
@@ -55,35 +56,48 @@ const EnvSchema = z
     }
   });
 
-const parsed = EnvSchema.parse({
-  GITHUB_MODE: process.env.GITHUB_MODE,
-  GH_TOKEN: process.env.GH_TOKEN,
-  GH_APP_ID: process.env.GH_APP_ID,
-  GH_APP_PRIVATE_KEY: process.env.GH_APP_PRIVATE_KEY,
-  GH_APP_INSTALLATION_ID: process.env.GH_APP_INSTALLATION_ID,
-  GH_WEBHOOK_SECRET: process.env.GH_WEBHOOK_SECRET,
+type Parsed = z.infer<typeof EnvSchema>;
+type EnvResolved = Omit<Parsed, "GH_APP_ID" | "GH_APP_INSTALLATION_ID"> & {
+  GH_APP_ID?: number;
+  GH_APP_INSTALLATION_ID?: number;
+  GH_APP_PRIVATE_KEY_PEM?: string;
+};
 
-  AGENT_SHARED_SECRET: process.env.AGENT_SHARED_SECRET,
-  AGENT_JWT_SECRET: process.env.AGENT_JWT_SECRET,
+let cachedEnv: EnvResolved | undefined;
 
-  REPO_ALLOWLIST: process.env.REPO_ALLOWLIST,
+export function getEnv(): EnvResolved {
+  if (cachedEnv) return cachedEnv;
+  const parsed = EnvSchema.parse({
+    GITHUB_MODE: process.env.GITHUB_MODE,
+    GH_TOKEN: process.env.GH_TOKEN,
+    GH_APP_ID: process.env.GH_APP_ID,
+    GH_APP_PRIVATE_KEY: process.env.GH_APP_PRIVATE_KEY,
+    GH_APP_INSTALLATION_ID: process.env.GH_APP_INSTALLATION_ID,
+    GH_WEBHOOK_SECRET: process.env.GH_WEBHOOK_SECRET,
 
-  NODE_ENV: process.env.NODE_ENV ?? "development",
-  LOG_LEVEL: (process.env.LOG_LEVEL as any) ?? "info",
-});
+    AGENT_SHARED_SECRET: process.env.AGENT_SHARED_SECRET,
+    AGENT_JWT_SECRET: process.env.AGENT_JWT_SECRET,
 
-const GH_APP_PRIVATE_KEY_PEM = parsed.GH_APP_PRIVATE_KEY
-  ? Buffer.from(parsed.GH_APP_PRIVATE_KEY, "base64").toString("utf8")
-  : undefined;
+    REPO_ALLOWLIST: process.env.REPO_ALLOWLIST,
 
-export const env = {
-  ...parsed,
-  GH_APP_ID: parsed.GH_APP_ID ? Number(parsed.GH_APP_ID) : undefined,
-  GH_APP_INSTALLATION_ID: parsed.GH_APP_INSTALLATION_ID
-    ? Number(parsed.GH_APP_INSTALLATION_ID)
-    : undefined,
-  GH_APP_PRIVATE_KEY_PEM,
-} as const;
+    NODE_ENV: process.env.NODE_ENV ?? "development",
+    LOG_LEVEL: (process.env.LOG_LEVEL as any) ?? "info",
+  });
 
-export type Env = typeof env;
+  const GH_APP_PRIVATE_KEY_PEM = parsed.GH_APP_PRIVATE_KEY
+    ? Buffer.from(parsed.GH_APP_PRIVATE_KEY, "base64").toString("utf8")
+    : undefined;
 
+  const out: EnvResolved = {
+    ...parsed,
+    GH_APP_ID: parsed.GH_APP_ID ? Number(parsed.GH_APP_ID) : undefined,
+    GH_APP_INSTALLATION_ID: parsed.GH_APP_INSTALLATION_ID
+      ? Number(parsed.GH_APP_INSTALLATION_ID)
+      : undefined,
+    GH_APP_PRIVATE_KEY_PEM,
+  };
+  cachedEnv = out;
+  return cachedEnv;
+}
+
+export type Env = EnvResolved;
