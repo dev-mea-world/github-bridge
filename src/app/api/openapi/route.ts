@@ -34,6 +34,7 @@ const openapiBase = {
     "/api/agent/execute": {
       post: {
         summary: "Execute a GitHub action",
+        operationId: "executeAction",
         security: [{ HmacAuth: [] }],
         requestBody: {
           required: true,
@@ -136,6 +137,7 @@ const openapiBase = {
     "/api/github/webhook": {
       post: {
         summary: "GitHub webhook receiver",
+        operationId: "receiveGithubWebhook",
         security: [{ GithubWebhookAuth: [] }],
         responses: {
           200: {
