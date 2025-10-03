@@ -1,0 +1,193 @@
+📊 Context & Details
+
+Prompt per Codex — incolla tutto sotto in una nuova chat/progetto
+
+RUOLO: Senior Full-Stack TS Engineer.
+OBIETTIVO: Genera un progetto Next.js 14 (App Router, TypeScript) deployabile su Vercel che funga da GitHub Bridge API per un assistente AI (Glor.IA). Il bridge esegue operazioni GitHub su repo a cui ho dato permesso (PAT fine-grained o GitHub App). Sicurezza forte, validazione rigorosa, log chiari.
+
+Requisiti Architetturali
+	•	Stack: Next.js 14 (App Router), TypeScript, Node 18+, @octokit/rest, zod, zod-fetch, pino, pino-pretty, jsonwebtoken, nanoid.
+	•	Deploy: Vercel. Imposta engines.node: ">=18". Nessuna dipendenza nativa.
+	•	Struttura:
+
+/src
+  /app
+    /api
+      /health/route.ts
+      /openapi/route.ts
+      /agent/execute/route.ts
+      /github/webhook/route.ts
+  /lib
+    auth.ts
+    env.ts
+    github.ts
+    schemas.ts
+    logger.ts
+  /types/index.ts
+package.json
+README.md
+.gitignore
+
+
+	•	Security:
+	•	Autenticazione HMAC (shared secret) per richieste dall’assistente: header X-Signature: sha256=<hex> calcolato su raw body con AGENT_SHARED_SECRET.
+	•	Auth JWT opzionale: header Authorization: Bearer <JWT> firmato con AGENT_JWT_SECRET per scenari multi-tenant.
+	•	Allowlist repo: REPO_ALLOWLIST = CSV di owner/repo (es. mea-world/glor.ia-core,acme/app).
+	•	Rate-limit leggero in-memory per IP/agentId: max 60 req/5 min.
+	•	Validazione Zod su ogni payload.
+	•	Risposte errore coerenti: { error: { code: string, message: string, details?: any } } e corretti HTTP status.
+	•	Segreti/Env (tutti richiesti salvo note):
+	•	GITHUB_MODE = PAT | APP
+	•	GH_TOKEN (se PAT)
+	•	GH_APP_ID, GH_APP_PRIVATE_KEY (PEM base64), GH_APP_INSTALLATION_ID (se APP)
+	•	AGENT_SHARED_SECRET (HMAC)
+	•	AGENT_JWT_SECRET (opzionale)
+	•	REPO_ALLOWLIST (CSV)
+	•	NODE_ENV, LOG_LEVEL (default info)
+	•	Logging: pino con payload minimi, nessun secret in log. Traccia requestId, agentId, action, repo.
+	•	OpenAPI: esponi /api/openapi che restituisce OpenAPI 3.1 JSON generato a mano (statico) con gli endpoint e gli schema esatti sotto.
+
+Endpoint
+
+1) GET /api/health
+	•	200 { status: "ok", ts: string }
+
+2) POST /api/agent/execute
+	•	Auth: HMAC obbligatorio; JWT opzionale.
+	•	Body (Zod):
+
+const ActionEnum = z.enum([
+  "GET_FILE",
+  "PUT_FILE",
+  "CREATE_BRANCH",
+  "OPEN_PR",
+  "LIST_PRS",
+  "MERGE_PR",
+  "CREATE_ISSUE",
+  "COMMENT_ISSUE",
+  "ADD_LABELS",
+  "SEARCH_CODE"
+]);
+
+const base = z.object({
+  agentId: z.string().min(1),
+  repo: z.string().regex(/^[^/]+\/[^/]+$/), // owner/repo
+  action: ActionEnum,
+});
+
+// Specifiche payload per action:
+const payloads = {
+  GET_FILE: z.object({ path: z.string(), ref: z.string().default("main") }),
+  PUT_FILE: z.object({
+    path: z.string(),
+    content: z.string(), // UTF-8
+    message: z.string().default("chore: update via Glor.IA"),
+    branch: z.string().optional(), // se omesso: crea branch auto
+    baseRef: z.string().default("main"),
+  }),
+  CREATE_BRANCH: z.object({ branch: z.string(), fromRef: z.string().default("main") }),
+  OPEN_PR: z.object({
+    head: z.string(), base: z.string().default("main"),
+    title: z.string(), body: z.string().optional()
+  }),
+  LIST_PRS: z.object({ state: z.enum(["open","closed","all"]).default("open") }),
+  MERGE_PR: z.object({ number: z.number(), method: z.enum(["merge","squash","rebase"]).default("squash") }),
+  CREATE_ISSUE: z.object({ title: z.string(), body: z.string().optional(), labels: z.array(z.string()).optional() }),
+  COMMENT_ISSUE: z.object({ number: z.number(), body: z.string() }),
+  ADD_LABELS: z.object({ number: z.number(), labels: z.array(z.string()).min(1) }),
+  SEARCH_CODE: z.object({ q: z.string().min(3) }) // usa "repo:owner/name" internamente
+} as const;
+
+
+	•	Behavior:
+	•	Verifica HMAC (X-Signature su raw body) e repo nell’allowlist.
+	•	Instanzia Octokit:
+	•	PAT: new Octokit({ auth: GH_TOKEN })
+	•	APP: genera installation token via @octokit/app (usa env per app+installation).
+	•	Implementa azioni:
+	•	GET_FILE → repos.getContent (file text), ritorna { path, ref, sha, content } (content UTF-8).
+	•	PUT_FILE → crea branch se branch assente (gloria/auto-<nanoid>), tenta getContent per sha (se 404 → create), poi createOrUpdateFileContents. Ritorna { branch, path, sha, commitUrl }.
+	•	CREATE_BRANCH → git.getRef + git.createRef.
+	•	OPEN_PR → pulls.create, ritorna numero e html_url.
+	•	LIST_PRS → pulls.list.
+	•	MERGE_PR → pulls.merge.
+	•	CREATE_ISSUE → issues.create.
+	•	COMMENT_ISSUE → issues.createComment.
+	•	ADD_LABELS → issues.addLabels.
+	•	SEARCH_CODE → search.code con query q + " repo:<owner>/<repo>".
+	•	Errori: normalizza eccezioni Octokit in { error: { code, message, details } }. Esempi code: UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, RATE_LIMITED, INTERNAL.
+	•	Esempi di risposta:
+	•	PUT_FILE → 201/200 { branch, path, sha, commitUrl }
+	•	OPEN_PR → 201 { number, url }
+
+3) POST /api/github/webhook
+	•	Riceve webhook GitHub (eventi minimi: pull_request, issues, push).
+	•	Verifica firma X-Hub-Signature-256 con GH_WEBHOOK_SECRET (aggiungi in env).
+	•	Logga evento e ritorna 200 { ok: true }. (Estendibile: callback webhook verso l’assistente).
+
+4) GET /api/openapi
+	•	Restituisce JSON OpenAPI 3.1 descrivendo i 3 endpoint, security scheme apiKey header X-Signature, e gli schema Zod tradotti.
+
+Implementazione
+	•	/lib/env.ts: valida ENV con Zod, esporta oggetti env tipizzati.
+	•	/lib/logger.ts: pino con requestId (usa nanoid) per ogni richiesta.
+	•	/lib/auth.ts:
+	•	Funzione verifyHmac(request: Request, secret: string): ottieni raw body via await request.arrayBuffer(), calcola sha256 HMAC, confronta con header.
+	•	JWT (opzionale) con jsonwebtoken.verify.
+	•	isRepoAllowed(repo: string): boolean leggendo REPO_ALLOWLIST.
+	•	/lib/github.ts:
+	•	Factory getOctokit() per PAT/App.
+	•	Helper getFileUtf8, putFileUtf8, createBranch, openPr, searchCode, ecc. Bonifica content base64.
+	•	/lib/schemas.ts: definisci Zod base+payloads+union discriminata.
+	•	/app/api/*/route.ts:
+	•	Usa Response.json, sempre CORS disabilitato (default Vercel). Mantieni semplice.
+	•	In execute/route.ts:
+	•	Leggi raw body prima di qualunque .json() per HMAC.
+	•	Dopo verifica, fai JSON.parse(raw) → valida con Zod.
+	•	Switch sull’action, chiama helper GitHub, gestisci status code corretti.
+	•	Error Handling:
+	•	try/catch generale, mappa errori Octokit:
+	•	401/403 → FORBIDDEN/UNAUTHORIZED
+	•	404 → NOT_FOUND
+	•	422 → VALIDATION_FAILED
+	•	429 → RATE_LIMITED
+	•	default → INTERNAL
+	•	Rate limiting:
+	•	Mappa in-memory {key → { count, resetAt }} con key = agentId o IP. Non bloccare health/openapi.
+	•	README.md:
+	•	Setup env dettagliato, esempi curl con HMAC, flusso PAT vs App, deploy su Vercel, note sicurezza.
+
+Esempi curl
+
+Calcolo firma (bash):
+
+BODY='{"agentId":"gloria","repo":"mea-world/glor.ia-core","action":"OPEN_PR","payload":{"head":"gloria/auto-123","title":"Glor.IA PR"}}'
+SIG="sha256=$(echo -n "$BODY" | openssl dgst -sha256 -hmac "$AGENT_SHARED_SECRET" -binary | xxd -p -c 256)"
+curl -X POST https://<your-vercel-domain>/api/agent/execute \
+  -H "Content-Type: application/json" \
+  -H "X-Signature: $SIG" \
+  --data "$BODY"
+
+Acceptance Criteria
+	•	✅ HMAC verificato su raw body (rifiuta se mismatch).
+	•	✅ Repo fuori allowlist → 403.
+	•	✅ PUT_FILE crea branch auto se assente e ritorna commitUrl.
+	•	✅ OPEN_PR ritorna numero e URL.
+	•	✅ Errori Octokit normalizzati con codici coerenti.
+	•	✅ /api/openapi documenta payload e security.
+	•	✅ Nessun secret in log.
+
+Extra (opzionale se tempo)
+	•	Aggiungi E2E minimal con Vitest per verifyHmac e isRepoAllowed.
+	•	Firma commit author/committer come Glor.IA Bot <gloria-bot@meaworld.com>.
+	•	Header Idempotency-Key supportato su PUT_FILE e OPEN_PR per evitare duplicazioni (memoria in-memory per 5 min).
+
+Nota: Implementa tutto in TypeScript, codice pulito e commentato. Mantieni compatibilità con esecuzione Edge/Node (scegli Node runtime per Octokit classico).
+
+⸻
+
+➡️ Next Steps
+	1.	Incolla il prompt in Codex e genera il progetto.
+	2.	Imposta le ENV su Vercel (PAT o App, HMAC secret, allowlist).
+	3.	Dammi il domain del bridge e l’AGENT_SHARED_SECRET: così posso iniziare a “parlare” al server con le azioni GET_FILE/PUT_FILE/OPEN_PR/....
+	4.	Vuoi che ti prepari anche un client minimal (TS) per Glor.IA con firma HMAC e helper per ogni azione? Posso dartelo subito.
