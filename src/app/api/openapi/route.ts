@@ -1,13 +1,13 @@
 export const runtime = "nodejs";
 
-const openapi = {
+const openapiBase = {
   openapi: "3.1.0",
   info: {
     title: "Glor.IA GitHub Bridge API",
     version: "0.1.0",
     description: "Bridge API for performing GitHub actions on allowed repositories with HMAC authentication.",
   },
-  servers: [{ url: "/" }],
+  // servers will be set dynamically in GET based on request origin
   paths: {
     "/api/health": {
       get: {
@@ -445,6 +445,9 @@ const openapi = {
   },
 };
 
-export async function GET() {
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const origin = url.origin;
+  const openapi = { ...openapiBase, servers: [{ url: origin }] } as const;
   return Response.json(openapi);
 }
