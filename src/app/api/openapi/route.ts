@@ -71,13 +71,13 @@ const openapiBase = {
               "application/json": {
                 schema: {
                   oneOf: [
+                    { $ref: "#/components/schemas/R_PUT_FILE" },
                     { $ref: "#/components/schemas/R_GET_FILE" },
                     { $ref: "#/components/schemas/R_LIST_PRS" },
                     { $ref: "#/components/schemas/R_MERGE_PR" },
                     { $ref: "#/components/schemas/R_COMMENT_ISSUE" },
                     { $ref: "#/components/schemas/R_ADD_LABELS" },
-                    { $ref: "#/components/schemas/R_SEARCH_CODE" },
-                    { type: "object" } // fallback for other 200s
+                    { $ref: "#/components/schemas/R_SEARCH_CODE" }
                   ]
                 },
                 examples: {

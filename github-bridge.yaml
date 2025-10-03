@@ -4,11 +4,12 @@ info:
   version: "0.1.0"
   description: Bridge API per operare su GitHub (HMAC richiesto).
 servers:
-  - url: /
+  - url: https://github-bridge-odrhjpaps-devs-projects-ddeec7cf.vercel.app
 paths:
   /api/agent/execute:
     post:
       summary: Esegui un'azione GitHub
+      operationId: executeAction
       security:
         - HmacAuth: []
       requestBody:
@@ -47,13 +48,13 @@ paths:
             application/json:
               schema:
                 oneOf:
+                  - $ref: "#/components/schemas/R_PUT_FILE"
                   - $ref: "#/components/schemas/R_GET_FILE"
                   - $ref: "#/components/schemas/R_LIST_PRS"
                   - $ref: "#/components/schemas/R_MERGE_PR"
                   - $ref: "#/components/schemas/R_COMMENT_ISSUE"
                   - $ref: "#/components/schemas/R_ADD_LABELS"
                   - $ref: "#/components/schemas/R_SEARCH_CODE"
-                  - type: object
         "201":
           description: Created
           content:
@@ -74,8 +75,7 @@ paths:
   /api/github/webhook:
     post:
       summary: GitHub webhook receiver
-      security:
-        - GithubWebhookAuth: []
+      operationId: receiveGithubWebhook
       responses:
         "200":
           description: OK
@@ -93,11 +93,6 @@ components:
       in: header
       name: X-Signature
       description: HMAC SHA256 di raw body con AGENT_SHARED_SECRET (sha256=<hex>).
-    GithubWebhookAuth:
-      type: apiKey
-      in: header
-      name: X-Hub-Signature-256
-      description: Firma GitHub (sha256=...) verificata con GH_WEBHOOK_SECRET.
   responses:
     Error:
       description: Error response
